@@ -1,0 +1,10 @@
+
+*.tsv
+*.pper
+.Rproj.user/D3C9DC7E/rmd-outputs
+.Rproj.user/D3C9DC7E/saved_source_markers
+.Rproj.user/D3C9DC7E/sources/prop/7A8B1773
+.Rproj.user/D3C9DC7E/sources/prop/BD2C7C21
+.Rproj.user/D3C9DC7E/sources/prop/INDEX
+*.txt
+.Rhistory
