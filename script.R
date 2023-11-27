@@ -4,6 +4,14 @@ library(TCGAbiolinks)
 library(SummarizedExperiment)
 library(DT)
 library(DESeq2)
+library(ggplot2)
+library(psych)
+library(NetworkToolbox)
+library(ggnet)
+library(GGally)
+library(sna)
+library(network)
+
 
 # Data download -----------------------------------------------------------
 
@@ -129,25 +137,18 @@ filtr.expr.c <- as.data.frame(normalized_counts[, 20:n_col])
 colnames(filtr.expr.c) <- substr(colnames(filtr.expr.c), 1, 12)
 
 
-#########################
-### ARRIVATO FINO QUA ###
-#########################
 
-#4: Gene selection ---- tocca farla?
+
+# Gene selection ----------------------------------------------------------
 
 genes <- read.csv2("targets.csv", row.names = 1)
 genes <- genes[,1]
-head(genes) #gene symbols, not ensemble ids
-
-#their enseble ids 
-genes.info[ genes.info$gene_name %in% genes, "gene_id"]
-#not all of them might be among our genes!
+head(genes) 
 
 genes.c <- intersect(rownames(filtr.expr.c), 
-                     genes.info[ genes.info$gene_name %in% genes , "gene_id"]   ) 
-
+                     genes.info.C[ genes.info.C$gene_name %in% genes , "gene_id"]   ) 
 genes.n <- intersect(rownames(filtr.expr.n),  
-                     genes.info2[ genes.info2$gene_name %in% genes , "gene_id"]   )  
+                     genes.info.N[ genes.info.N$gene_name %in% genes , "gene_id"]   )  
 
 setdiff(genes.c, genes.n)
 
@@ -158,24 +159,22 @@ length(genes.n)
 filtr.expr.n <- filtr.expr.n[genes.n, ]
 filtr.expr.c <- filtr.expr.c[genes.c, ]
 
-rownames(filtr.expr.n) <- genes.info2[genes.n, "gene_name"]
-rownames(filtr.expr.c) <- genes.info[genes.c, "gene_name"]
+rownames(filtr.expr.c) <- genes.info.C[genes.c, "gene_name"]
+rownames(filtr.expr.n) <- genes.info.N[genes.n, "gene_name"]
 
 
-#5: Differentially expressed genes (DEGs) (+ brief enrichment overview) ----- 
 
-#what are DEGs?
+# Differentially expressed genes (DEGs) -----------------------------------
+
 fc <-  log2(rowMeans(filtr.expr.c) / rowMeans(filtr.expr.n) ) 
 names(fc) <- rownames(filtr.expr.c)
 head(fc)
-#what is the fold change?
 
-pval.fc <- sapply(1:nrow(filtr.expr.c), function(i) (t.test(filtr.expr.c[i,], filtr.expr.n[i,] ))$p.value)
+pval.fc <- sapply(1:nrow(filtr.expr.c), function(i) (t.test(filtr.expr.c[i, ], filtr.expr.n[i, ] ))$p.value)
 pval.fc.fdr <- p.adjust(pval.fc, method="fdr")
 
 expr.table <- data.frame(cbind(fc, pval.fc.fdr))
-expr.table[,1] <- round(expr.table[,1],2)
-#expr.table[,2] <- format(expr.table[,2], digits = 4) nice for printing but it converts to string
+expr.table[,1] <- round(expr.table[, 1], 2)
 
 deg.genes <- rownames(expr.table[abs(expr.table$fc) >= 1.5 & expr.table$pval.fc.fdr <=0.01,]) 
 deg.genes
@@ -183,7 +182,7 @@ deg.genes
 head(expr.table[deg.genes,], 10)
 #write.table(expr.table[deg.genes,], file = "DEG.csv", sep = ";")
 
-#volcano plot
+### Volcano plot ###
 
 expr.table$diffexpressed <- "NO";
 expr.table$diffexpressed[expr.table$fc >= 1.5 & expr.table$pval.fc.fdr <= 0.01] <- "UP"
@@ -201,56 +200,45 @@ ggplot(data=expr.table, aes(x=fc, y=-log10(pval.fc.fdr), col=diffexpressed))+
   geom_vline(xintercept=1.5, col="red")+
   geom_vline(xintercept=-1.5, col="red")
 
-
 # print and enrichment 
-cat(deg.genes , sep = "\n")
+cat(deg.genes, sep = "\n")
 
 
-
-
-
-
-
-
-#6: Adjacency matrices of co-expression networks -----
+# Adjacency matrices of co-expression networks ----------------------------
 
 #cancer network
 cor.mat.c <- corr.test(t(filtr.expr.c), use = "pairwise", 
-                       method = "spearman",adjust="fdr",ci=FALSE)
-
+                       method = "spearman", adjust="fdr", ci=FALSE)
 rho.c <- cor.mat.c$r
 diag(rho.c) <- 0
 qval.c <- cor.mat.c$p
-#qvals are reported on the upper triangle only
 qval.c[lower.tri(qval.c)] <- t(qval.c)[lower.tri(qval.c)]
-
 adj.mat.c <- rho.c * (qval.c <= 0.05)
 
 #normal network 
 cor.mat.n <- corr.test(t(filtr.expr.n), use = "pairwise", 
-                       method = "spearman",adjust="fdr",ci=FALSE)
-
+                       method = "spearman", adjust="fdr", ci=FALSE)
 rho.n <- cor.mat.n$r
 diag(rho.n) <- 0
 qval.n <- cor.mat.n$p
 qval.n[lower.tri(qval.n)] <- t(qval.n)[lower.tri(qval.n)]
-
 adj.mat.n <- rho.n * (qval.n <= 0.05)
 
-#7: Co-expression networks ----
 
-#Cancer network 
 
-net.c <- network(adj.mat.c, matrix.type="adjacency",ignore.eval = FALSE, names.eval = "weights")
+# Co-expression networks --------------------------------------------------
 
+# Cancer network 
+net.c <- network(adj.mat.c, matrix.type="adjacency", 
+                 ignore.eval=FALSE, names.eval="weights")
 network.density(net.c)
 network.size(net.c)
 network.edgecount(net.c) 
-#nrow(component.largest(net.c, result = "graph")) #1549
+#nrow(component.largest(net.c, result = "graph"))
 clustcoeff(adj.mat.c, weighted = FALSE)$CC
 
 sum(adj.mat.c != 0)
-#how many positive/negative correlations? 
+# how many positive/negative correlations? 
 sum(adj.mat.c > 0) 
 sum(adj.mat.c < 0) 
 
@@ -258,10 +246,10 @@ degree.c <- rowSums(adj.mat.c != 0)
 names(degree.c) <- rownames(adj.mat.c)
 degree.c <- sort(degree.c, decreasing = T)
 head(degree.c,10)
-sum(degree.c == 0) #unconnected nodes 
+sum(degree.c == 0) # unconnected nodes 
 
 hist(degree.c)
-x <- quantile(degree.c[degree.c>0],0.95) #how big is the degree of the most connected nodes?
+x <- quantile(degree.c[degree.c>0], 0.95) # how big is the degree of the most connected nodes?
 x
 hist(degree.c)
 abline(v=x, col="red")
@@ -269,7 +257,7 @@ abline(v=x, col="red")
 hubs.c <- degree.c[degree.c>=x]
 names(hubs.c) #
 
-net.c %v% "type" = ifelse(network.vertex.names(net.c) %in% names(hubs.c),"hub", "non-hub")
+net.c %v% "type" = ifelse(network.vertex.names(net.c) %in% names(hubs.c), "hub", "non-hub")
 net.c %v% "color" = ifelse(net.c %v% "type" == "hub", "tomato", "deepskyblue3")
 set.edge.attribute(net.c, "edgecolor", ifelse(net.c %e% "weights" > 0, "red", "blue"))
 
@@ -308,14 +296,15 @@ ggnet2(net.c2, color = "deepskyblue3", alpha = 0.7, size = 2,
 adj.mat.c <- rho.c * (qval.c <= 5e-4)
 
 
-#Normal network 
+# Normal network 
 
-net.n <- network(adj.mat.n, matrix.type="adjacency",ignore.eval = FALSE, names.eval = "weights")
+net.n <- network(adj.mat.n, matrix.type="adjacency",
+                 ignore.eval=FALSE, names.eval = "weights")
 
 network.density(net.n)
 network.size(net.n)
 network.edgecount(net.n)
-clustcoeff(adj.mat.n, weighted = FALSE)$CC
+clustcoeff(adj.mat.n, weighted=FALSE)$CC
 #nrow(component.largest(net.n, result = "graph")) #1549
 
 sum(adj.mat.n != 0)
@@ -325,12 +314,12 @@ sum(adj.mat.n < 0)
 
 degree.n <- rowSums(adj.mat.n != 0)
 names(degree.n) <- rownames(adj.mat.n)
-degree.n <- sort(degree.n, decreasing = T)
+degree.n <- sort(degree.n, decreasing=T)
 head(degree.n,10)
-sum(degree.n == 0) #unconnected nodes 
+sum(degree.n == 0) # unconnected nodes 
 
 hist(degree.n)
-y <- quantile(degree.n[degree.n>0],0.95) #how big is the degree of the most connected nodes?
+y <- quantile(degree.n[degree.n>0], 0.95) #how big is the degree of the most connected nodes?
 y
 hist(degree.n)
 abline(v=y, col="red")
