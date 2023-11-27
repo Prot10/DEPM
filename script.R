@@ -182,7 +182,9 @@ deg.genes
 head(expr.table[deg.genes,], 10)
 #write.table(expr.table[deg.genes,], file = "DEG.csv", sep = ";")
 
-### Volcano plot ###
+#------------------#
+#-- Volcano plot --#
+#------------------#
 
 expr.table$diffexpressed <- "NO";
 expr.table$diffexpressed[expr.table$fc >= 1.5 & expr.table$pval.fc.fdr <= 0.01] <- "UP"
@@ -194,7 +196,7 @@ summary(expr.table$diffexpressed)
 
 ggplot(data=expr.table, aes(x=fc, y=-log10(pval.fc.fdr), col=diffexpressed))+  
   geom_point() +
-  xlab("fold change (log2)") + 
+  xlab("Fold change (log2)") + 
   ylab("-log10 adjusted p-value") +
   geom_hline(yintercept=-log10(0.01), col="red")+
   geom_vline(xintercept=1.5, col="red")+
@@ -208,7 +210,7 @@ cat(deg.genes, sep = "\n")
 
 #cancer network
 cor.mat.c <- corr.test(t(filtr.expr.c), use = "pairwise", 
-                       method = "spearman", adjust="fdr", ci=FALSE)
+                       method="spearman", adjust="fdr", ci=FALSE)
 rho.c <- cor.mat.c$r
 diag(rho.c) <- 0
 qval.c <- cor.mat.c$p
@@ -245,7 +247,7 @@ sum(adj.mat.c < 0)
 degree.c <- rowSums(adj.mat.c != 0)
 names(degree.c) <- rownames(adj.mat.c)
 degree.c <- sort(degree.c, decreasing = T)
-head(degree.c,10)
+head(degree.c, 10)
 sum(degree.c == 0) # unconnected nodes 
 
 hist(degree.c)
@@ -265,9 +267,9 @@ set.edge.attribute(net.c, "edgecolor", ifelse(net.c %e% "weights" > 0, "red", "b
 #net.c %v% "x" = coord.c[, 1]
 #net.c %v% "y" = coord.c[, 2]
 
-ggnet2(net.c, color = "color", alpha = 0.7, size = 2,  #mode= c("x","y"),
-       edge.color = "edgecolor", edge.alpha = 1, edge.size = 0.15)+
-  guides(size = "none") 
+ggnet2(net.c, color="color", alpha=0.7, size=2,  #mode= c("x","y"),
+       edge.color="edgecolor", edge.alpha=1, edge.size=0.15)+
+  guides(size="none") 
 
 #this is extremely dense... what if we change the pval threshold?
 adj.mat.c <- rho.c * (qval.c <= 0.01)
@@ -315,7 +317,7 @@ sum(adj.mat.n < 0)
 degree.n <- rowSums(adj.mat.n != 0)
 names(degree.n) <- rownames(adj.mat.n)
 degree.n <- sort(degree.n, decreasing=T)
-head(degree.n,10)
+head(degree.n, 10)
 sum(degree.n == 0) # unconnected nodes 
 
 hist(degree.n)
@@ -341,6 +343,50 @@ adj.mat.n <- rho.c * (qval.c <= 1e-4) #too much?
 
 
 intersect(names(hubs.c), names(hubs.n))
+
+
+#------------------------------#
+#-- Degree distribution plot --#
+#------------------------------#
+
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# Preparing the data for ggplot
+cancer_data <- data.frame(degree = degree.c, type = "Cancer")
+normal_data <- data.frame(degree = degree.n, type = "Normal")
+
+# Combining the datasets
+combined_data <- rbind(cancer_data, normal_data)
+
+# Calculating the 95th percentile for each type
+percentiles <- combined_data %>% 
+  group_by(type) %>% 
+  summarize(p95 = quantile(degree[degree > 0], 0.95))
+
+# Creating the ggplot objects with improved aesthetics
+plot_cancer <- ggplot(subset(combined_data, type == "Cancer"), aes(x=degree)) +
+  geom_histogram(binwidth = 35, fill="#FF9999", color="black") + # Light red fill
+  geom_vline(data=subset(percentiles, type == "Cancer"), aes(xintercept=p95),
+             color="darkred", linetype="dashed", size=0.7) +
+  ggtitle("Degree Distribution: Cancer Network") +
+  xlab("Degree") + ylab("Frequency") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot_normal <- ggplot(subset(combined_data, type == "Normal"), aes(x=degree)) +
+  geom_histogram(binwidth = 35, fill="#99CCFF", color="black") + # Light blue fill
+  geom_vline(data=subset(percentiles, type == "Normal"), aes(xintercept=p95),
+             color="darkblue", linetype="dashed", size=0.5) +
+  ggtitle("Degree Distribution: Normal Network") +
+  xlab("Degree") + ylab("Frequency") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.7))
+
+# Displaying the plots side by side
+grid.arrange(plot_cancer, plot_normal, ncol=2)
+
 
 
 #8: Plotting the hub subnetwork -----
@@ -385,6 +431,71 @@ ggnet2(net.hub,  color = "color",alpha = 0.9, size = 2,
        edge.color = "ecolor", edge.alpha = 0.9,  edge.size = 0.15, 
        node.label = names.hubs, label.color = "black", label.size = 4)+
   guides(size = "none") 
+
+
+
+
+# Bonus points ------------------------------------------------------------
+
+
+
+# 1- Compute a different centrality index (CI) ----------------------------
+
+install.packages("igraph")  # Install igraph if you haven't already
+library(igraph)             # Load igraph package
+
+top5pct_degree.c <- head(degree.c, length(degree.c) * 0.05)
+
+# betweenness
+betweenness.c <- betweenness(net.c)#, directed = FALSE)
+names(betweenness.c) <- rownames(adj.mat.c)
+betweenness.c <- sort(betweenness.c, decreasing = TRUE)
+top5pct_betweenness.c <- head(betweenness.c, length(betweenness.c) * 0.05)
+
+# closeness
+closeness.c <- closeness(net.c)#, mode = "all")
+names(closeness.c) <- rownames(adj.mat.c)
+closeness.c <- sort(closeness.c, decreasing = TRUE)
+top5pct_closeness.c <- head(closeness.c, length(closeness.c) * 0.05)
+
+# pagerank
+# Assuming adj.mat.c is your adjacency matrix
+net.c.graph <- graph_from_adjacency_matrix(adj.mat.c, mode = "undirected")
+pagerank.c <- page.rank(net.c.graph)$vector
+names(pagerank.c) <- rownames(adj.mat.c)
+pagerank.c <- sort(pagerank.c, decreasing = TRUE)
+top5pct_pagerank.c <- head(pagerank.c, length(pagerank.c) * 0.05)
+
+# overlap with degree based hubs
+overlap_betweenness.c <- intersect(names(top5pct_betweenness.c), names(top5pct_degree.c))
+overlap_betweenness.c
+overlap_closeness.c <- intersect(names(top5pct_closeness.c), names(top5pct_degree.c))
+overlap_closeness.c
+overlap_pagerank.c <- intersect(names(top5pct_pagerank.c), names(top5pct_degree.c))
+overlap_pagerank.c
+
+# overlap between all the metrics
+intersect(intersect(overlap_betweenness.c, overlap_closeness.c), overlap_pagerank.c)
+
+
+
+# 2- Perform the study using a different similarity measure ---------------
+
+install.packages("correlation")
+library(correlation)
+
+# use biweight midcorrelation
+correlation(filtr.expr.c, method = "biweight", p_adjust = "none")
+
+
+# 3- Perform gene set enrichment analysis ---------------------------------
+
+
+# 4- Task 5 using gene expression profiles related to normal --------------
+
+
+# 5- Perform PSN communities characterization -----------------------------
+
 
 
 
