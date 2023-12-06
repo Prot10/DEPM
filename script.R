@@ -1,5 +1,6 @@
 # Libraries ---------------------------------------------------------------
 
+if ("package:igraph" %in% search()) detach("package:igraph", unload = TRUE, character.only = TRUE)
 library(TCGAbiolinks)
 library(SummarizedExperiment)
 library(DT)
@@ -13,6 +14,14 @@ library(sna)
 library(network)
 library(dplyr)
 library(gridExtra)
+library(RColorBrewer)
+
+set.seed(123)
+
+# Define a palette
+pal <- c("olivedrab3", "olivedrab4", "dodgerblue3", "dodgerblue4",
+         "darkorange1", "darkorange3", "firebrick1", "firebrick3",
+         "gray75", "gray65")
 
 
 # 1. Data download -----------------------------------------------------------
@@ -61,14 +70,11 @@ save(rna.query.C, rna.data.C, rna.expr.data.C, genes.info.C,
 load("MyData.RData")
 
 # Initial checks
-ncol(rna.expr.data.C)
-head(colnames(rna.expr.data.C))
-head(substr(colnames(rna.expr.data.N), 1, 12))
+dim(rna.expr.data.C)
+length(unique(substr(colnames(rna.expr.data.C), 1, 12))) # no duplicates 
 
 dim(rna.expr.data.N)
 length(unique(substr(colnames(rna.expr.data.N), 1, 12))) # no duplicates 
-dim(rna.expr.data.C)
-length(unique(substr(colnames(rna.expr.data.C), 1, 12))) # no duplicates 
 
 # Keeping patients with one sample
 expr.C <- as.data.frame(rna.expr.data.C)
@@ -76,10 +82,10 @@ expr.N <- as.data.frame(rna.expr.data.N)
 
 # Rename patients in a shorter way
 colnames(expr.C) <- substr(colnames(expr.C), 1, 12)
-unique(colnames(expr.C))
+length(unique(colnames(expr.C))) == length(unique(substr(colnames(rna.expr.data.C), 1, 12)))
 
 colnames(expr.N) <- substr(colnames(expr.N), 1, 12)
-length(unique(colnames(expr.N)))
+length(unique(colnames(expr.N))) == length(unique(substr(colnames(rna.expr.data.N), 1, 12)))
 
 intersect(colnames(expr.N), colnames(expr.C))
 setdiff(colnames(expr.N), colnames(expr.C))
@@ -94,8 +100,10 @@ any(is.na(expr.N))             # ok
 any(is.nan(as.matrix(expr.N))) # ok
 
 # Consider only patients for which we have both normal and cancer samples
-expr.C <- expr.C[, colnames(expr.N)]
-
+expr.C <- expr.C[, intersect(colnames(expr.N), colnames(expr.C))]
+expr.N <- expr.N[, intersect(colnames(expr.N), colnames(expr.C))]
+dim(expr.C)
+dim(expr.N)
 
 # 1.2 Normalizing data with Deseq2 --------------------------------------------
 
@@ -106,7 +114,6 @@ n_col     <- ncol(full.data)
 dim(full.data)
 
 metad <- c(rep("normal", n_col/2), rep("cancer", n_col/2))
-metad
 metad <- data.frame(metad)
 rownames(metad) <- colnames(full.data)
 colnames(metad)[1] <- "condition"
@@ -122,7 +129,7 @@ dds <- DESeqDataSetFromMatrix(countData=full.data,
 
 dim(counts(dds))
 
-# Filtering: at least ten counts on 90% of patients?
+# Filtering: at least ten counts on 90% of patients
 threshold <- round((n_col*90) / 100)
 keep <- rowSums(counts(dds) >= 10) >= threshold
 dds  <- dds[keep,]
@@ -133,11 +140,9 @@ normalized_counts <- counts(dds, normalized=TRUE)
 sum(rowSums(normalized_counts == 0) == n_col) # no null rows
 
 filtr.expr.n <- as.data.frame(normalized_counts[, 1:(n_col/2)])
-filtr.expr.c <- as.data.frame(normalized_counts[, 20:n_col])
+filtr.expr.c <- as.data.frame(normalized_counts[, (n_col/2+1):n_col])
 # Cancerous sample names were added a ".1" in full.data because they had the same names as the normal samples
 colnames(filtr.expr.c) <- substr(colnames(filtr.expr.c), 1, 12)
-
-
 
 
 # 1.3 Gene selection ----------------------------------------------------------
@@ -180,13 +185,12 @@ pval.fc.fdr <- p.adjust(pval.fc, method="fdr")
 expr.table <- data.frame(cbind(fc, pval.fc.fdr))
 expr.table[,1] <- round(expr.table[, 1], 2)
 
-fc.threshold   <- 1
+fc.threshold   <- 1.2
 pval.threshold <- 0.05
 deg.genes <- rownames(expr.table[abs(expr.table$fc) >= fc.threshold & expr.table$pval.fc.fdr <= pval.threshold,]) 
-length(deg.genes)
+length(deg.genes) # number of significant genes
 
 head(expr.table[deg.genes, ], 10)
-#write.table(expr.table[deg.genes,], file = "DEG.csv", sep = ";")
 
 #------------------#
 #-- Volcano plot --#
@@ -200,26 +204,31 @@ head(expr.table)
 expr.table$diffexpressed <- as.factor(expr.table$diffexpressed)
 summary(expr.table$diffexpressed)
 
-custom_colors <- c("NO" = "#CFCFCF", "UP" = "#FF9999", "DOWN" = "#99FF99")
-pastel_orange <- "#FFD1A1"
+
+custom_colors1 <- c("NO" = pal[9], "UP" = pal[3], "DOWN" = pal[7])
+custom_colors2 <- c("NO" = pal[10], "UP" = pal[4], "DOWN" = pal[8])
 
 ggplot(data=expr.table, aes(x=fc, y=-log10(pval.fc.fdr), col=diffexpressed)) +  
-  geom_point() +
-  scale_color_manual(values=custom_colors, name="Differential expressed") +
+  geom_point(size = 1.85,
+             alpha = 0.6,
+             stroke = 0.7,
+             aes(color = diffexpressed, fill = diffexpressed)) +  # Fill color for points
+  scale_color_manual(values = custom_colors1, name = "Differential expressed") +
+  scale_fill_manual(values = custom_colors2) +  # Darker colors for outline
   xlab("Fold change (log2)") + 
   ylab("-log10 adjusted p-value") +
-  geom_hline(yintercept=-log10(pval.threshold), col=pastel_orange) +
-  geom_vline(xintercept=fc.threshold, col=pastel_orange) +
-  geom_vline(xintercept=-fc.threshold, col=pastel_orange) +
+  geom_hline(yintercept = -log10(pval.threshold), col = pal[5]) +
+  geom_vline(xintercept = fc.threshold, col = pal[5]) +
+  geom_vline(xintercept = -fc.threshold, col = pal[5]) +
   ggtitle("Volcano Plot") +
+  xlim(-3, 5) +
   theme_bw() +
-  theme(legend.position=c(0.95, 0.95), 
-        legend.justification=c(1, 1), 
-        legend.background = element_rect(color="black", linewidth=0.2, linetype="solid"), 
-        legend.box.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "mm"))
+  theme(legend.position = c(0.95, 0.95), 
+        legend.justification = c(1, 1), 
+        legend.background = element_rect(color = "black", linewidth = 0.2, linetype = "solid"), 
+        legend.box.margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "mm")) +
+  guides(fill = FALSE)
 
-# print and enrichment 
-cat(deg.genes, sep = "\n")
 
 
 # 3. Co-expression networks ----------------------------
@@ -228,7 +237,7 @@ cat(deg.genes, sep = "\n")
 #-- Computation --#
 #-----------------#
 
-rho.threshold <- 0.65
+rho.threshold <- 0.675
 
 # Cancer network
 filtr.expr.c <- filtr.expr.c[deg.genes, ] # taking only the significant genes
@@ -277,22 +286,25 @@ percentiles <- combined_data %>%
   group_by(type) %>% 
   summarize(p95 = quantile(degree[degree > 0], 0.95))
 
-# Plotting in a grid
 plot_cancer <- ggplot(subset(combined_data, type == "Cancer"), aes(x=degree)) +
-  geom_histogram(binwidth = 9, fill="#FF9999", color="black") +
+  geom_histogram(binwidth = 4, fill=pal[7], color="darkred") +
   geom_vline(data=subset(percentiles, type == "Cancer"), aes(xintercept=p95),
-             color="darkred", linetype="dashed", linewidth=0.7) +
+             color=pal[6], linetype="dashed", linewidth=0.6) +
   ggtitle("Degree Distribution: Cancer Network") +
   xlab("Degree") + ylab("Frequency") +
+  geom_text(data=subset(percentiles, type=="Cancer"), aes(x=p95, y=60, label="Quantile\nat 95%"),
+            color="black", vjust=-0.5, hjust=1.2) +
   theme_bw() + 
   theme(plot.title = element_text(hjust = 0.5))
 
 plot_normal <- ggplot(subset(combined_data, type == "Normal"), aes(x=degree)) +
-  geom_histogram(binwidth = 5, fill="#99CCFF", color="black") +
+  geom_histogram(binwidth = 5, fill=pal[3], color="darkblue") +
   geom_vline(data=subset(percentiles, type == "Normal"), aes(xintercept=p95),
-             color="darkblue", linetype="dashed", linewidth=0.5) +
+             color=pal[6], linetype="dashed", linewidth=0.6) +
   ggtitle("Degree Distribution: Normal Network") +
   xlab("Degree") + ylab("Frequency") +
+  geom_text(data=subset(percentiles, type == "Normal"), aes(x=p95, y=30.1, label="Quantile\nat 95%"),
+            color="black", vjust=-0.5, hjust=1.2) +
   theme_bw() + 
   theme(plot.title = element_text(hjust = 0.7))
 
@@ -362,7 +374,7 @@ ggnet2(net.n, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
        label = label.nodes.n, label.size = 2.5) +
   theme_minimal() +
   theme(legend.position = "none") +
-  ggtitle("Differential Co-Expressed Network") +
+  ggtitle("Normal Network") +
   labs(color = "Node Type") +
   theme(plot.title = element_text(hjust = 0.5))
 
@@ -388,10 +400,7 @@ z.threshold <- 3
 diff.cor.mat <- ifelse(abs(z.scores) < z.threshold, 0, 1)
 
 # Custom colors
-custom_colors <- c("hub" = "#FF9999", "non-hub" = "#CFCFCF")
-pastel_orange <- "#FFD1A1"
-pastel_blue <- "#ADD8E6"
-pastel_green <- "#99FF99"
+custom_colors <- c("hub"=pal[5], "non-hub"=pal[9])
 
 # Creating the network
 net <- network(diff.cor.mat, matrix.type="adjacency", 
@@ -409,17 +418,17 @@ names(hubs)
 net %v% "type" = ifelse(network.vertex.names(net) %in% names(hubs), "hub", "non-hub")
 net %v% "color" = ifelse(net %v% "type" == "hub", custom_colors["hub"], custom_colors["non-hub"])
 net %v% "size" = (rowSums(adj.mat.c != 0) / max(rowSums(adj.mat.c != 0)) + 0.1) * 10
-set.edge.attribute(net, "edgecolor", ifelse(net %e% "weights" > 0, pastel_blue, pastel_green))
+set.edge.attribute(net, "edgecolor", ifelse(net %e% "weights" > 0, pal[3], pal[7]))
 
 coord <- gplot.layout.fruchtermanreingold(net, NULL)
 net %v% "x" = coord[, 1]
 net %v% "y" = coord[, 2]
 
-label.nodes <- ifelse(network.vertex.names(net) %in% names(hubs), names(hubs), "")
+label.nodes <- ifelse(network.vertex.names(net) %in% names(hubs), network.vertex.names(net), "")
 
 # Plotting the network
-ggnet2(net, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
-       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5,
+ggnet2(net, color = "color", alpha = 0.8, size = "size", mode = c("x", "y"),
+       edge.color = "edgecolor", edge.alpha = 0.2, edge.size = 0.4,
        label = label.nodes, label.size = 2.5) +
   theme_minimal() +
   theme(legend.position = "none") +
@@ -427,15 +436,10 @@ ggnet2(net, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
   labs(color = "Node Type") +
   theme(plot.title = element_text(hjust = 0.5))
 
-# Identify hubs: top 5% nodes with highest degree
-num.hubs <- ceiling(length(degree) * 0.05)
-hubs <- names(degree[order(-degree)[1:num.hubs]])
-hubs
-
 
 # 5. Patient Similarity Network (PSN) -------------------------------------
 
-library(igraph)
+#-- 5.1 Compute the Patient Similarity Network using cancer gene expression profile --#
 
 # Compute the Euclidean distance matrix for all significant genes
 distance_matrix.c <- as.matrix(dist(t(filtr.expr.c)))
@@ -444,63 +448,94 @@ distance_matrix.c <- as.matrix(dist(t(filtr.expr.c)))
 similarity_matrix.c <- 1 - (distance_matrix.c / max(distance_matrix.c))
 diag(similarity_matrix.c) <- 0
 
-psn.c <- graph_from_adjacency_matrix(similarity_matrix.c, mode =  "undirected", weighted = TRUE)
+psn.c <- network(similarity_matrix.c, matrix.type="adjacency", 
+                ignore.eval=FALSE, names.eval="weights")
 
-clusterlouvain.c <- cluster_louvain(psn.c, resolution=1)
-num_communities.c <- length(unique(clusterlouvain.c$membership))
 
-coords.c <- layout_with_fr(psn.c)
-plot(psn.c, vertex.color=rainbow(num_communities.c, alpha=0.6)[clusterlouvain.c$membership],
-     layout=coords.c, vertex.label=NA, edge.width=(E(psn.c)$weight), edge.color='black')
-title('Community detection of patients based\non the similarity network\n(all genes with euclidian)')
+#-- 5.2 Perform the community detection (e.g. apply Louvain algorithm to the PSN) --#
 
-f.c <- subgraph.edges(graph=psn.c, eids = E(psn.c)[.from(which(clusterlouvain$membership==1)[5])])
-la.c <- layout_with_fr(f.c)
-plot(f.c, vertex.color=c('red','cyan'), vertex.label=NA, 
-     edge.width=(E(f.c)$weight*5), edge.color='black', layout=la.c)
-title('Visualization of the difference in link weights
-      from one selected node to all the others')
+l.comp.c <- component.largest(psn.c, result = "graph")
+l.comp.c <- similarity_matrix.c[rownames(l.comp.c), rownames(l.comp.c)]
+
+write.csv2(l.comp.c, "input-matrix-c.csv")
+
+# Let's open the terminal 
+# pip install bctpy
+# python3 btc-community-c.py input-matrix-c.csv
+
+comm.res.c <- read.csv2("output-c.txt", header = FALSE)
+rownames(comm.res.c) <- rownames(l.comp.c)
+
+net.final.c <- network(l.comp.c, matrix.type="adjacency", ignore.eval=FALSE, names.eval="weights", directed=F)
+set.edge.attribute(net.final.c, "edgecolor", ifelse(net.final.c %e% "weights" > 0, pal[9], pal[10]))
+
+all(net.final.c %v% "vertex.names" == rownames(comm.res.c)) # ok
+net.final.c %v% "community" <-  as.character(comm.res.c[,1])
+
+#let's reverse the membership information
+comm.res.c <- cbind(comm.res.c, rownames(comm.res.c))
+colnames(comm.res.c) <- c("com", "gene") 
+
+n_comm.c <- length(unique(net.final.c %v% "community"))
+communities.c <- vector("list", n_comm.c)
+
+for (i in 1:n_comm.c) communities.c[[i]] <- comm.res.c[comm.res.c$com == i, 2]
+
+# Force positioning 
+copy.comp.c <- l.comp.c*0
+
+# Add strong weight between members of the same community 
+for (cindex in 1:n_comm.c){
+  copy.comp.c[communities.c[[cindex]], 
+              communities.c[[cindex]]] <- 1}
+
+copy.net.c <- network(copy.comp.c,  matrix.type="adjacency", ignore.eval=FALSE,
+                      names.eval="weights", directed=F)
+coord.comm.c <- gplot.layout.fruchtermanreingold(copy.net.c, NULL)
+
+net.final.c %v% "x" = coord.comm.c[, 1]
+net.final.c %v% "y" = coord.comm.c[, 2]
+
+names(pal) <- c(4, 6, 5, 2, 1, 7, 8, 3, 9, 10)
+
+ggnet2(net.final.c, color="community", alpha = 0.85, palette=pal,
+       mode=c("x", "y"), edge.color="edgecolor", edge.alpha=0.6, edge.size=0.25) +
+  guides(size="none") +
+  theme_minimal() +
+  ggtitle("Patient Similarity Network\nusing Cancer's Gene") +
+  labs(color = "Community") +
+  theme(plot.title = element_text(hjust = 0.5))
+
 
 # Bonus points ------------------------------------------------------------
 
 
 # Bonus 1- Compute a different centrality index (CI) ----------------------------
 
-install.packages("igraph")  # Install igraph if you haven't already
-library(igraph)             # Load igraph package
-
 top5pct_degree.c <- head(degree.c, length(degree.c) * 0.05)
 
-# betweenness
+# Betweenness
 betweenness.c <- betweenness(net.c)#, directed = FALSE)
 names(betweenness.c) <- rownames(adj.mat.c)
 betweenness.c <- sort(betweenness.c, decreasing = TRUE)
 top5pct_betweenness.c <- head(betweenness.c, length(betweenness.c) * 0.05)
+names(top5pct_betweenness.c)
 
-# closeness
+# Closeness
 closeness.c <- closeness(net.c)#, mode = "all")
 names(closeness.c) <- rownames(adj.mat.c)
 closeness.c <- sort(closeness.c, decreasing = TRUE)
 top5pct_closeness.c <- head(closeness.c, length(closeness.c) * 0.05)
+names(top5pct_closeness.c)
 
-# pagerank
-# Assuming adj.mat.c is your adjacency matrix
-net.c.graph <- graph_from_adjacency_matrix(adj.mat.c, mode = "undirected")
-pagerank.c <- page.rank(net.c.graph)$vector
-names(pagerank.c) <- rownames(adj.mat.c)
-pagerank.c <- sort(pagerank.c, decreasing = TRUE)
-top5pct_pagerank.c <- head(pagerank.c, length(pagerank.c) * 0.05)
-
-# overlap with degree based hubs
+# Overlap with degree based hubs
 overlap_betweenness.c <- intersect(names(top5pct_betweenness.c), names(top5pct_degree.c))
 overlap_betweenness.c
 overlap_closeness.c <- intersect(names(top5pct_closeness.c), names(top5pct_degree.c))
 overlap_closeness.c
-overlap_pagerank.c <- intersect(names(top5pct_pagerank.c), names(top5pct_degree.c))
-overlap_pagerank.c
 
 # overlap between all the metrics
-intersect(intersect(overlap_betweenness.c, overlap_closeness.c), overlap_pagerank.c)
+intersect(overlap_betweenness.c, overlap_closeness.c)
 
 
 # Bonus 2- Perform the study using a different similarity measure ---------------
@@ -566,24 +601,29 @@ percentiles <- combined_data %>%
 
 # Plotting in a grid
 plot_cancer <- ggplot(subset(combined_data, type == "Cancer"), aes(x=degree)) +
-  geom_histogram(binwidth = 7, fill="#FF9999", color="black") +
+  geom_histogram(binwidth = 4, fill=pal[7], color="darkred") +
   geom_vline(data=subset(percentiles, type == "Cancer"), aes(xintercept=p95),
-             color="darkred", linetype="dashed", linewidth=0.7) +
+             color=pal[6], linetype="dashed", linewidth=0.6) +
   ggtitle("Degree Distribution: Cancer Network") +
+  geom_text(data=subset(percentiles, type=="Cancer"), aes(x=p95, y=60, label="Quantile\nat 95%"),
+            color="black", vjust=-0.5, hjust=1.2) +
   xlab("Degree") + ylab("Frequency") +
   theme_bw() + 
   theme(plot.title = element_text(hjust = 0.5))
 
 plot_normal <- ggplot(subset(combined_data, type == "Normal"), aes(x=degree)) +
-  geom_histogram(binwidth = 5, fill="#99CCFF", color="black") +
+  geom_histogram(binwidth = 5, fill=pal[3], color="darkblue") +
   geom_vline(data=subset(percentiles, type == "Normal"), aes(xintercept=p95),
-             color="darkblue", linetype="dashed", linewidth=0.5) +
+             color=pal[6], linetype="dashed", linewidth=0.6) +
   ggtitle("Degree Distribution: Normal Network") +
+  geom_text(data=subset(percentiles, type == "Normal"), aes(x=p95, y=25, label="Quantile\nat 95%"),
+            color="black", vjust=-0.5, hjust=1.2) +
   xlab("Degree") + ylab("Frequency") +
   theme_bw() + 
   theme(plot.title = element_text(hjust = 0.7))
 
 grid.arrange(plot_cancer, plot_normal, ncol=2)
+
 
 #-- If so, find the hubs (5% of the nodes with highest degree values), compare hubs sets related to the two condition (cancer, normal) and identify the hubs selectively characterizing each network --#
 
@@ -596,11 +636,11 @@ pastel_green <- "#99FF99"
 
 # Identify hubs
 x <- quantile(degree.c[degree.c > 0], 0.95)
-hubs.c <- degree.c[degree.c >= x]
-names(hubs.c)
+hubs.c1 <- degree.c[degree.c >= x]
+names(hubs.c1)
 
 # Set vertex and edge attributes
-net.c %v% "type" = ifelse(network.vertex.names(net.c) %in% names(hubs.c), "hub", "non-hub")
+net.c %v% "type" = ifelse(network.vertex.names(net.c) %in% names(hubs.c1), "hub", "non-hub")
 net.c %v% "color" = ifelse(net.c %v% "type" == "hub", custom_colors["hub"], custom_colors["non-hub"])
 net.c %v% "size" = (rowSums(adj.mat.c != 0) / max(rowSums(adj.mat.c != 0)) + 0.1) * 10
 set.edge.attribute(net.c, "edgecolor", ifelse(net.c %e% "weights" > 0, pastel_blue, pastel_green))
@@ -647,14 +687,100 @@ ggnet2(net.n, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
   labs(color = "Node Type") +
   theme(plot.title = element_text(hjust = 0.5))
 
-intersect(names(hubs.c), names(hubs.n))
+intersect(names(hubs.c1), names(hubs.n))
 
+# Bonus 2.4- Differential Co-expressed Network ---------------------------------------
+
+pal <- c("olivedrab3", "olivedrab4", "dodgerblue3", "dodgerblue4",
+         "darkorange1", "darkorange3", "firebrick1", "firebrick3",
+         "gray75", "gray65")
+
+# Fisher z-transformation
+z.mat.c <- atanh(cor.mat.c)
+z.mat.n <- atanh(cor.mat.n)
+
+# Sample sizes for each condition
+n.c <- ncol(filtr.expr.c)
+n.n <- ncol(filtr.expr.n)
+
+# Compute z-scores for differential correlation
+z.scores <- (z.mat.c-z.mat.n) / sqrt((1/(n.c-3)) + (1/(n.n-3)))
+
+# Apply the threshold |Z| < 3
+z.threshold <- 3
+diff.cor.mat <- ifelse(abs(z.scores) < z.threshold, 0, 1)
+
+# Custom colors
+custom_colors <- c("hub"=pal[5], "non-hub"=pal[9])
+
+# Creating the network
+net <- network(diff.cor.mat, matrix.type="adjacency", 
+               ignore.eval=FALSE, names.eval="weights")
+degree <- rowSums(adj.mat.c != 0)
+names(degree) <- rownames(diff.cor.mat)
+degree <- sort(degree, decreasing = T)
+
+# Identify hubs
+z <- quantile(degree[degree > 0], 0.95)
+hubs <- degree[degree >= z]
+names(hubs)
+
+# Set vertex and edge attributes
+net %v% "type" = ifelse(network.vertex.names(net) %in% names(hubs), "hub", "non-hub")
+net %v% "color" = ifelse(net %v% "type" == "hub", custom_colors["hub"], custom_colors["non-hub"])
+net %v% "size" = (rowSums(adj.mat.c != 0) / max(rowSums(adj.mat.c != 0)) + 0.1) * 10
+set.edge.attribute(net, "edgecolor", ifelse(net %e% "weights" > 0, pal[3], pal[7]))
+
+coord <- gplot.layout.fruchtermanreingold(net, NULL)
+net %v% "x" = coord[, 1]
+net %v% "y" = coord[, 2]
+
+label.nodes <- ifelse(network.vertex.names(net) %in% names(hubs), network.vertex.names(net), "")
+
+# Plotting the network
+ggnet2(net, color = "color", alpha = 0.8, size = "size", mode = c("x", "y"),
+       edge.color = "edgecolor", edge.alpha = 0.2, edge.size = 0.4,
+       label = label.nodes, label.size = 2.5) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  ggtitle("Differential Co-Expressed Network") +
+  labs(color = "Node Type") +
+  theme(plot.title = element_text(hjust = 0.5))
 
 # Bonus 3- Perform gene set enrichment analysis ---------------------------------
 
+selected.genes <- names(hubs.c)
+
+# enrichR on R 
+library(enrichR)
+
+websiteLive <- getOption("enrichR.live")
+if (websiteLive) {
+  listEnrichrSites()
+  setEnrichrSite("Enrichr") # Human genes   
+}
+
+if (websiteLive) dbs <- listEnrichrDbs()
+if (websiteLive) head(dbs)
+if (websiteLive) dbs$libraryName
+
+dbs <- c("GO_Biological_Process_2023", "KEGG_2021_Human")
+if (websiteLive) {enriched <- enrichr(selected.genes, dbs)}
+if (websiteLive) View(enriched[["GO_Biological_Process_2023"]])
+
+# Plotting the results
+# GO
+if (websiteLive) {
+  plotEnrich(enriched[[1]], showTerms = 20, numChar = 40, y = "Count", orderBy = "P.value")}
+# KEGG
+if (websiteLive) {
+  plotEnrich(enriched[[2]], showTerms = 20, numChar = 40, y = "Count", 
+             orderBy = "P.value") }
 
 
 # Bonus 4- Task 5 using gene expression profiles related to normal --------------
+
+#-- Bonus 4.1 Compute the Patient Similarity Network using cancer gene expression profile --#
 
 # Compute the Euclidean distance matrix for all significant genes
 distance_matrix.n <- as.matrix(dist(t(filtr.expr.n)))
@@ -663,23 +789,145 @@ distance_matrix.n <- as.matrix(dist(t(filtr.expr.n)))
 similarity_matrix.n <- 1 - (distance_matrix.n / max(distance_matrix.n))
 diag(similarity_matrix.n) <- 0
 
-psn.n <- graph_from_adjacency_matrix(similarity_matrix.n, mode="undirected", weighted = TRUE)
+psn.n <- network(similarity_matrix.n, matrix.type="adjacency", 
+                 ignore.eval=FALSE, names.eval="weights")
 
-clusterlouvain.n <- cluster_louvain(psn, resolution=1)
-num_communities.n <- length(unique(clusterlouvain.n$membership))
+#-- Bonus 4.2 Perform the community detection (e.g. apply Louvain algorithm to the PSN) --#
 
-coords.n <- layout_with_fr(psn.n)
-plot(psn.n, vertex.color=rainbow(num_communities.n, alpha=0.6)[clusterlouvain.n$membership],
-     layout=coords.n, vertex.label=NA, edge.width=(E(psn.n)$weight), edge.color='black')
-title('Community detection of patients based\non the similarity network\n(all genes with euclidian)')
+l.comp.n <- component.largest(psn.n, result = "graph")
+l.comp.n <- similarity_matrix.n[rownames(l.comp.n), rownames(l.comp.n)]
 
-#plotting a subset to highlight the edges width based on their weights (similarity measure)
-f.n  <- subgraph.edges(graph=psn.n, eids = E(psn.n)[.from(which(clusterlouvain.n$membership==1)[5])])
-la.n <- layout_with_fr(f.n)
-plot(f.n, vertex.color=c('red', 'cyan'), vertex.label=NA, edge.width=(E(f)$weight*5),
-     edge.color='black', layout=la.n)
-title('Visualization of the difference in link weights
-      from one selected node to all the others')
+write.csv2(l.comp.n, "input-matrix-n.csv")
+
+# Let's open the terminal 
+# pip install bctpy
+# python3 btc-community-n.py input-matrix-n.csv
+
+comm.res.n <- read.csv2("output-n.txt", header = FALSE)
+rownames(comm.res.n) <- rownames(l.comp.n)
+
+net.final.n <- network(l.comp.n, matrix.type="adjacency", ignore.eval=FALSE, names.eval="weights", directed=F)
+set.edge.attribute(net.final.n, "edgecolor", ifelse(net.final.n %e% "weights" > 0, pal[9], pal[10]))
+
+all(net.final.n %v% "vertex.names" == rownames(comm.res.n)) # ok
+net.final.n %v% "community" <-  as.character(comm.res.n[,1])
+
+#let's reverse the membership information
+comm.res.n <- cbind(comm.res.n, rownames(comm.res.n))
+colnames(comm.res.n) <- c("com", "gene") 
+
+n_comm.n <- length(unique(net.final.n %v% "community"))
+communities.n <- vector("list", n_comm.n)
+
+for (i in 1:n_comm.n) communities.n[[i]] <- comm.res.n[comm.res.n$com == i, 2]
+
+# Force positioning 
+copy.comp.n <- l.comp.n*0
+
+# Add strong weight between members of the same community 
+for (cindex in 1:n_comm.n){
+  copy.comp.n[communities.n[[cindex]], 
+              communities.n[[cindex]]] <- 1}
+
+copy.net.n <- network(copy.comp.n,  matrix.type="adjacency", ignore.eval=FALSE,
+                      names.eval="weights", directed=F)
+coord.comm.n <- gplot.layout.fruchtermanreingold(copy.net.n, NULL)
+
+net.final.n %v% "x" = coord.comm.n[, 1]
+net.final.n %v% "y" = coord.comm.n[, 2]
+
+pal <- c("olivedrab3", "olivedrab4", "dodgerblue3", "dodgerblue4",
+         "darkorange1", "darkorange3", "firebrick1", "firebrick3",
+         "gray75", "gray65")
+names(pal) <- c(4, 6, 5, 2, 3, 7, 8, 1, 9, 10)
+
+ggnet2(net.final.n, color="community", alpha = 0.85, palette=pal,
+       mode=c("x", "y"), edge.color="edgecolor", edge.alpha=0.6, edge.size=0.25) +
+  guides(size="none") +
+  theme_minimal() +
+  ggtitle("Patient Similarity Network\nusing Normal's Gene") +
+  labs(color = "Community") +
+  theme(plot.title = element_text(hjust = 0.5))
 
 # Bonus 5- Perform PSN communities characterization -----------------------------
 
+rownames(clinical.query) <- clinical.query$submitter_id
+
+# Status
+table(clinical.query$vital_status)
+
+# Reformat it to 0=censored, 1=dead
+clinical.query$status <- ifelse(clinical.query$vital_status == "Alive", 0, 1)
+
+# What is overall survival? 
+clinical.query$os <- ifelse(clinical.query$vital_status == "Alive", 
+                            clinical.query$days_to_last_follow_up,
+                            clinical.query$days_to_death)
+
+library(survival)
+library(ggsurvfit)
+library(dplyr)
+
+survfit2(Surv(os, status) ~ 1, data=clinical.query) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Days",
+    y = "Overall survival probability")+ 
+  add_confidence_interval()
+
+#risk table
+survfit2(Surv(os, status) ~ 1, data = clinical.query) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Days",
+    y = "Overall survival probability")+ 
+  add_confidence_interval()+
+  add_risktable()
+
+library(survminer)
+ggsurvplot(survfit(Surv(os, status) ~ 1, data = clinical.query),
+           conf.int = TRUE,
+           risk.table = TRUE, # Add risk table
+           surv.median.line = "hv", # Specify median survival
+           ggtheme = theme_bw() )
+
+
+### Groups comparison ###
+
+# Sex
+ggsurvplot(survfit(Surv(os, status) ~ gender, data = clinical.query),
+           pval = TRUE, conf.int = T,
+           risk.table.col = "strata",  break.time.by = 500, 
+           size = 1, legend.labs =  c("Females", "Males"),
+           risk.table.height = 0.25, 
+           ggtheme = theme_bw(), xlab = "Time in days", risk.table = "abs_pct",
+           risk.table.y.text.col = T,
+           risk.table.y.text = FALSE,
+           #ncensor.plot = TRUE,
+           palette = c("darkorange1", "dodgerblue3"))
+
+table(clinical.query$prior_malignancy)
+table(clinical.query$race)
+
+# Race
+ggsurvplot(survfit(Surv(os, status) ~ race, data = clinical.query),
+           pval = TRUE, conf.int = F,
+           risk.table.col = "strata",  break.time.by = 500, 
+           size = 1, risk.table.height = 0.25, 
+           ggtheme = theme_bw(), xlab = "Time in days", risk.table = "abs_pct",
+           risk.table.y.text.col = T, risk.table.y.text = FALSE,
+           palette = c("#E7B800", "#2E9FDF", "#f75752", "#75a716", "#ba62fe"))
+
+# Age (over 65)
+clinical.query$over65 <- ifelse(clinical.query$age_at_index >= 65, T, F)
+
+ggsurvplot(survfit(Surv(os, status) ~ over65, data = clinical.query),
+           pval = TRUE, conf.int = T,
+           risk.table.col = "strata",  break.time.by = 500, 
+           size = 1, legend.labs =  c("Under 65", "Over 65"),
+           risk.table.height = 0.25, 
+           ggtheme = theme_bw(), xlab = "Time in days", risk.table = "abs_pct",
+           risk.table.y.text.col = T,
+           risk.table.y.text = FALSE,
+           #ncensor.plot = TRUE,
+           palette = c("darkorange1", "dodgerblue3"))
