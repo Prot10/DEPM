@@ -323,49 +323,17 @@ coord.c <- gplot.layout.fruchtermanreingold(net.c, NULL)
 net.c %v% "x" = coord.c[, 1]
 net.c %v% "y" = coord.c[, 2]
 
+label.nodes.c <- ifelse(network.vertex.names(net.c) %in% names(hubs.c), names(hubs.c), "")
+
 # Plotting the network
 ggnet2(net.c, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
-       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5) +
+       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5,
+       label = label.nodes.c, label.size = 2.5) +
   theme_minimal() +
   theme(legend.position = "none") +
   ggtitle("Cancer Network") +
   labs(color = "Node Type") +
   theme(plot.title = element_text(hjust = 0.5))
-
-library(network)
-library(GGally)
-library(sna)
-library(ggplot2)
-hub_names <- names(hubs.c)
-
-# Set vertex and edge attributes
-net.c %v% "type" = ifelse(network.vertex.names(net.c) %in% hub_names, "hub", "non-hub")
-net.c %v% "color" = ifelse(net.c %v% "type" == "hub", custom_colors["hub"], custom_colors["non-hub"])
-net.c %v% "size" = (rowSums(adj.mat.c != 0) / max(rowSums(adj.mat.c != 0)) + 0.1) * 10
-set.edge.attribute(net.c, "edgecolor", ifelse(net.c %e% "weights" > 0, pastel_blue, pastel_green))
-
-# Compute the layout
-coord.c <- gplot.layout.fruchtermanreingold(net.c, NULL)
-net.c %v% "x" = coord.c[, 1]
-net.c %v% "y" = coord.c[, 2]
-
-net_df <- fortify(net.c)
-
-# Filter for hub nodes
-hub_df <- net_df[net_df$label %in% hub_names, ]
-
-# Plotting the network with labels for hubs
-gg <- ggnet2(net.c, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
-             edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5) +
-  geom_text(data = hub_df, aes(label = label, x = x, y = y), vjust = -1, size = 3) +
-  scale_color_manual(values = custom_colors, name = "Node Type") +
-  theme_minimal() +
-  theme(legend.position = "right") +
-  ggtitle("Cancer Network") +
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Display the plot
-print(gg)
 
 
 # Normal network 
@@ -386,9 +354,12 @@ coord.n <- gplot.layout.fruchtermanreingold(net.n, NULL)
 net.n %v% "x" = coord.n[, 1]
 net.n %v% "y" = coord.n[, 2]
 
+label.nodes.n <- ifelse(network.vertex.names(net.n) %in% names(hubs.n), names(hubs.n), "")
+
 # Plotting the network
 ggnet2(net.n, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
-       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5) +
+       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5,
+       label = label.nodes.n, label.size = 2.5) +
   theme_minimal() +
   theme(legend.position = "none") +
   ggtitle("Differential Co-Expressed Network") +
@@ -444,9 +415,12 @@ coord <- gplot.layout.fruchtermanreingold(net, NULL)
 net %v% "x" = coord[, 1]
 net %v% "y" = coord[, 2]
 
+label.nodes <- ifelse(network.vertex.names(net) %in% names(hubs), names(hubs), "")
+
 # Plotting the network
 ggnet2(net, color = "color", alpha = 0.7, size = "size", mode = c("x", "y"),
-       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5) +
+       edge.color = "edgecolor", edge.alpha = 0.8, edge.size = 0.5,
+       label = label.nodes, label.size = 2.5) +
   theme_minimal() +
   theme(legend.position = "none") +
   ggtitle("Differential Co-Expressed Network") +
