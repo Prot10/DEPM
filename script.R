@@ -414,6 +414,23 @@ z <- quantile(degree[degree > 0], 0.95)
 hubs <- degree[degree >= z]
 names(hubs)
 
+
+plot_data <- data.frame(degree = degree)
+percentiles <- plot_data %>% 
+  summarize(p95 = quantile(degree[degree > 0], 0.95))
+
+ggplot(plot_data, aes(x=degree)) +
+        geom_histogram(binwidth = 4, fill=pal[7], color="darkred") +
+        geom_vline(data=subset(percentiles), aes(xintercept=p95),
+                   color=pal[6], linetype="dashed", linewidth=0.6) +
+        ggtitle("Degree Distribution of the Co-Expressed Network") +
+        xlab("Degree") + ylab("Frequency") +
+        geom_text(data=subset(percentiles), aes(x=p95, y=60, label="Quantile\nat 95%"),
+                  color="black", vjust=-0.5, hjust=1.2) +
+        theme_bw() + 
+        theme(plot.title = element_text(hjust = 0.5))
+
+
 # Set vertex and edge attributes
 net %v% "type" = ifelse(network.vertex.names(net) %in% names(hubs), "hub", "non-hub")
 net %v% "color" = ifelse(net %v% "type" == "hub", custom_colors["hub"], custom_colors["non-hub"])
@@ -724,6 +741,21 @@ degree <- sort(degree, decreasing = T)
 z <- quantile(degree[degree > 0], 0.95)
 hubs <- degree[degree >= z]
 names(hubs)
+
+plot_data <- data.frame(degree = degree)
+percentiles <- plot_data %>% 
+  summarize(p95 = quantile(degree[degree > 0], 0.95))
+
+ggplot(plot_data, aes(x=degree)) +
+  geom_histogram(binwidth = 4, fill=pal[3], color="darkblue") +
+  geom_vline(data=subset(percentiles), aes(xintercept=p95),
+             color=pal[6], linetype="dashed", linewidth=0.6) +
+  ggtitle("Degree Distribution of the Co-Expressed Network") +
+  xlab("Degree") + ylab("Frequency") +
+  geom_text(data=subset(percentiles), aes(x=p95, y=60, label="Quantile\nat 95%"),
+            color="black", vjust=-0.5, hjust=1.2) +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5))
 
 # Set vertex and edge attributes
 net %v% "type" = ifelse(network.vertex.names(net) %in% names(hubs), "hub", "non-hub")
